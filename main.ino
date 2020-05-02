@@ -1,14 +1,18 @@
 #include <Adafruit_NeoPixel.h>
 
 // Pin settings
-const int analogPin = 2;
-const int barPin = 3;
+const int elevatorDestinationPin = 12;
+const int elevatorActivatedLEDPin = 3;
 const int elevatorDoorLEDPin = 4; 
+const int elevatorBarPin = 11;
+const int downBarPin = 13;
+const int analogPin = 2;
+const int upBarPin = 10;
 
 /* LED Colors */
-int red = 255;
-int green = 165;
-int blue = 0;
+int red = 100;
+int green = 65;
+int blue = 255;
 
 /* State machine */
 enum { 
@@ -38,15 +42,15 @@ enum {
 } buttonsUp;
 
 enum {
-	buttonFloor0Down=187,
-	buttonFloor1Down=194,
-	buttonFloor2Down=201,
-	buttonFloor3Down=208,
-	buttonFloor4Down=214,
-	buttonFloor5Down=221,
-	buttonFloor6Down=227,
-	buttonFloor7Down=234,
-	buttonFloor8Down=240,
+	buttonFloor1Down=187,
+	buttonFloor2Down=194,
+	buttonFloor3Down=201,
+	buttonFloor4Down=208,
+	buttonFloor5Down=214,
+	buttonFloor6Down=221,
+	buttonFloor7Down=227,
+	buttonFloor8Down=234,
+	buttonFloor9Down=240
 } buttonsDown;
 
 
@@ -60,6 +64,7 @@ enum {
 	buttonFloor6=286,
 	buttonFloor7=291,
 	buttonFloor8=296,
+    buttonFloor9=322,
 	buttonCloseDoor=302,
 	buttonEmergency=307,
 	buttonOn=312,
@@ -67,11 +72,11 @@ enum {
 } buttonsElevator;
 
 /* Useful functions */
-void turnOn(int pin) {
+void turnOnLED(int pin) {
     digitalWrite(pin, HIGH);
 }
 
-void turnOff(int pin) {
+void turnOffLED(int pin) {
     digitalWrite(pin, LOW);
 }
 
@@ -79,30 +84,41 @@ void turnOff(int pin) {
 class Elevator {
     private:
         // Attributes
-        int currentFloor = 0;
-        int floorCount;
-        int pixelCount;
-        int embusTime = 2000;
-        int floorDelay = 1500;
+        Adafruit_NeoPixel currentFloorBar;
+        Adafruit_NeoPixel destinationBar;
+        Adafruit_NeoPixel downBar;
+        Adafruit_NeoPixel upBar;
         bool doorState = false;
-        Adafruit_NeoPixel pixels;
+        int floorDelay = 1500;
+        int currentFloor = 0;
+        int embusTime = 2000;
+        int floorCount = 10;
         
         // Methods
-        void goUp(int floor);
+        void changeDestinationBar(int destination);
         void goDown(int floor);
-        void startPixels();
-        void openDoor();
-        void closeDoor();
+        void goUp(int floor);
         void doorAction();
+        void closeDoor();
+        void openDoor();
+
+    protected:
+        void startPixels();
+        void clearLEDBars();
 
     public:
-        Elevator(int _floorCount){
-            floorCount = _floorCount;
-            pixels = Adafruit_NeoPixel(10, barPin, NEO_GRB + NEO_KHZ800);
-            startPixels();
+        Elevator(){
+            Serial.println("Setting up elevator");
+
+            upBar = Adafruit_NeoPixel(floorCount, upBarPin, NEO_GRB + NEO_KHZ800);
+            currentFloorBar = Adafruit_NeoPixel(floorCount, elevatorBarPin, NEO_GRB + NEO_KHZ800);
+            destinationBar = Adafruit_NeoPixel(floorCount, elevatorDestinationPin, NEO_GRB + NEO_KHZ800);
+            downBar = Adafruit_NeoPixel(floorCount, downBarPin, NEO_GRB + NEO_KHZ800);
+
+            Serial.println("OK");
         }
-        bool isDoorOpened();
         void move(int floor);
+        bool isDoorOpened();
 
 };
 
@@ -113,12 +129,10 @@ bool Elevator::isDoorOpened() {
 
 void Elevator::openDoor() {
     doorState = true;
-    turnOn(elevatorDoorLEDPin);
 };
 
 void Elevator::closeDoor() {
     doorState = false;
-    turnOff(elevatorDoorLEDPin);
 };
 
 void Elevator::doorAction() {
@@ -131,9 +145,9 @@ void Elevator::goUp(int floor) {
     while(floor >= currentFloor) {
         delay(floorDelay);
         currentFloor++;
-        pixels.setPixelColor(currentFloor - 1, red, green, blue);
-        pixels.show();
-        pixels.setPixelColor(currentFloor - 1, 0, 0, 0);
+        currentFloorBar.setPixelColor(currentFloor - 1, red, green, blue);
+        currentFloorBar.show();
+        currentFloorBar.setPixelColor(currentFloor - 1, 0, 0, 0);
     }
     doorAction();
 };
@@ -142,16 +156,17 @@ void Elevator::goDown(int floor) {
     while(floor < currentFloor - 1) {
         delay(floorDelay);
         currentFloor--;
-        pixels.setPixelColor(currentFloor - 1, red, green, blue);
-        pixels.show();
-        pixels.setPixelColor(currentFloor - 1, 0, 0, 0);
+        currentFloorBar.setPixelColor(currentFloor - 1, red, green, blue);
+        currentFloorBar.show();
+        currentFloorBar.setPixelColor(currentFloor - 1, 0, 0, 0);
     }
     doorAction();
 };
 
 void Elevator::move(int floor) {
-    pixels.setPixelColor(currentFloor - 1, 0, 0, 0);
-    
+    changeDestinationBar(floor);
+    currentFloorBar.setPixelColor(currentFloor - 1, 0, 0, 0);
+
     if(isDoorOpened()) {
         Serial.println("The door is opened. Please, wait until it closes to proceed.");
     } else {
@@ -164,13 +179,91 @@ void Elevator::move(int floor) {
 };
 
 void Elevator::startPixels() {
-    pixels.begin();
-    pixels.setPixelColor(currentFloor, red, green, blue);
-    pixels.show();
+    currentFloorBar.begin();
+    currentFloorBar.setPixelColor(currentFloor, red, green, blue);
+    currentFloorBar.show();
+
+    destinationBar.begin();
+    destinationBar.setPixelColor(currentFloor, red, green, blue);
+    destinationBar.show();
+
+    upBar.begin();
+    upBar.setPixelColor(currentFloor, red, green, blue);
+    upBar.show();
+
+    downBar.begin();
+    downBar.setPixelColor(currentFloor, red, green, blue);
+    downBar.show();
 };
 
-// 'global' Elevator object
-Elevator *elevator;
+void Elevator::changeDestinationBar(int destination) {
+    destinationBar.setPixelColor(currentFloor, 0, 0, 0);
+    destinationBar.setPixelColor(destination, red, green, blue);
+    destinationBar.show();
+};
+
+
+void Elevator::clearLEDBars() {
+    currentFloorBar.setPixelColor(currentFloor, 0, 0, 0);
+    currentFloorBar.show();
+
+    destinationBar.setPixelColor(currentFloor, 0, 0, 0);
+    destinationBar.show();
+
+    downBar.setPixelColor(currentFloor, 0, 0, 0);
+    downBar.show();
+
+    upBar.setPixelColor(currentFloor, 0, 0, 0);
+    upBar.show();
+
+};
+
+class ElevatorController: public Elevator {
+    private:
+        bool flagElevator = false;
+        bool isElevatorActive();
+    
+    public:
+        void move(int floor);
+        void turnOff();
+        void turnOn();
+};
+
+bool ElevatorController::isElevatorActive() {
+    return flagElevator;
+};
+
+void ElevatorController::turnOn() {
+    if(!flagElevator){
+        flagElevator = true;
+        turnOnLED(elevatorActivatedLEDPin);
+        Serial.println("Activating elevator");
+        Elevator::startPixels();
+    } else {
+        Serial.println("Elevator already activated");
+    }
+};
+
+void ElevatorController::turnOff() {
+    if(flagElevator){
+        flagElevator = false;
+        turnOffLED(elevatorActivatedLEDPin);
+        Serial.println("Deactivating elevator");
+        Elevator::clearLEDBars();
+    } else {
+        Serial.println("Elevator already deactivated");
+    }
+};
+
+void ElevatorController::move(int floor) {
+    if(!isElevatorActive()){
+        Serial.println("Unable to perform this action because the elevator is not active");
+    } else {
+        Elevator::move(floor);
+    }
+};
+
+ElevatorController *elevator;
 
 /* Elevator moves according to the desired floor by the button pressed */
 void gotoFloor() {
@@ -185,17 +278,20 @@ void gotoFloor() {
         case buttonFloor6: elevator->move(6); break;
         case buttonFloor7: elevator->move(7); break;
         case buttonFloor8: elevator->move(8); break;
+        case buttonOff: elevator->turnOff(); break;
+        case buttonOn: elevator->turnOn(); break;
     }
 }
 
 void setup() {
     pinMode(analogPin, FALLING);
+    pinMode(elevatorActivatedLEDPin, OUTPUT);
 
     Serial.begin(9600);
 
     attachInterrupt(0, gotoFloor, INPUT_PULLUP);
 
-    elevator = new Elevator(9); 
+    elevator = new ElevatorController(); 
 }
 
 void loop() {

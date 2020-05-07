@@ -3,7 +3,8 @@
 // Pin settings
 const int elevatorDestinationPin = 12;
 const int elevatorActivatedLEDPin = 3;
-const int elevatorDoorLEDPin = 4; 
+const int elevatorDoorLEDPin = 5;
+const int emergencyLEDPin = 4;
 const int elevatorBarPin = 11;
 const int downBarPin = 13;
 const int analogPin = 2;
@@ -84,10 +85,12 @@ class StateMachine {
     public:
         void operative() {
             state = OCIOSO;
+            Serial.println("Elevator idling");
         };
 
         void inoperative() {
             state = INOPERANTE;
+            Serial.println("Inoperative elevator");
         };
 
         void idle() {
@@ -132,17 +135,45 @@ class Elevator {
     private:
         Adafruit_NeoPixel currentFloorBar;
         Adafruit_NeoPixel destinationBar;
-        Adafruit_NeoPixel downBar;
-        Adafruit_NeoPixel upBar;
+        bool isEmergencyTriggered = false;
         bool isDoorOpened = false;
         int floorDelay = 1500;
         int currentFloor = 0;
-        int embusTime = 2000;
         int floorCount = 10;
         
         void changeDestinationBar(int destination) {
             destinationBar.setPixelColor(currentFloor, 0, 0, 0);
             destinationBar.setPixelColor(destination, red, green, blue);
+            destinationBar.show();
+        };     
+
+    protected:
+        void openDoor() {
+            isDoorOpened = true;
+            turnOnLED(elevatorDoorLEDPin);
+        };
+
+        void closeDoor() {
+            isDoorOpened = false;
+            turnOffLED(elevatorDoorLEDPin);
+        };
+
+
+        void startPixels() {
+            currentFloorBar.begin();
+            currentFloorBar.setPixelColor(currentFloor, red, green, blue);
+            currentFloorBar.show();
+
+            destinationBar.begin();
+            destinationBar.setPixelColor(currentFloor, red, green, blue);
+            destinationBar.show();
+        };
+
+        void clearLEDBars() {
+            currentFloorBar.setPixelColor(currentFloor, 0, 0, 0);
+            currentFloorBar.show();
+
+            destinationBar.setPixelColor(currentFloor, 0, 0, 0);
             destinationBar.show();
         };
 
@@ -154,7 +185,7 @@ class Elevator {
                 currentFloorBar.show();
                 currentFloorBar.setPixelColor(currentFloor - 1, 0, 0, 0);
             }
-            doorAction();
+            openDoor();
         };
 
         void goUp(int floor) {
@@ -165,138 +196,144 @@ class Elevator {
                 currentFloorBar.show();
                 currentFloorBar.setPixelColor(currentFloor - 1, 0, 0, 0);
             }
-            doorAction();
-        };      
-
-        void doorAction() {
             openDoor();
-            delay(embusTime);
-            closeDoor();
+        }; 
+
+        void triggerEmergency() {
+            isEmergencyTriggered = true;
+            turnOnLED(emergencyLEDPin);
         };
 
-    protected:
-        void closeDoor() {
-            isDoorOpened = false;
-        };
-
-        void openDoor() {
-            isDoorOpened = true;
-        };
-
-        void startPixels() {
-            currentFloorBar.begin();
-            currentFloorBar.setPixelColor(currentFloor, red, green, blue);
-            currentFloorBar.show();
-
-            destinationBar.begin();
-            destinationBar.setPixelColor(currentFloor, red, green, blue);
-            destinationBar.show();
-
-            upBar.begin();
-            upBar.setPixelColor(currentFloor, red, green, blue);
-            upBar.show();
-
-            downBar.begin();
-            downBar.setPixelColor(currentFloor, red, green, blue);
-            downBar.show();
-        };
-
-        void clearLEDBars() {
-            currentFloorBar.setPixelColor(currentFloor, 0, 0, 0);
-            currentFloorBar.show();
-
-            destinationBar.setPixelColor(currentFloor, 0, 0, 0);
-            destinationBar.show();
-
-            downBar.setPixelColor(currentFloor, 0, 0, 0);
-            downBar.show();
-
-            upBar.setPixelColor(currentFloor, 0, 0, 0);
-            upBar.show();
+        void untriggerEmergency() {
+            isEmergencyTriggered = false;
+            turnOffLED(emergencyLEDPin);
         };
 
     public:
         Elevator(){
             Serial.println("Setting up elevator");
 
-            upBar = Adafruit_NeoPixel(floorCount, upBarPin, NEO_GRB + NEO_KHZ800);
             currentFloorBar = Adafruit_NeoPixel(floorCount, elevatorBarPin, NEO_GRB + NEO_KHZ800);
             destinationBar = Adafruit_NeoPixel(floorCount, elevatorDestinationPin, NEO_GRB + NEO_KHZ800);
-            downBar = Adafruit_NeoPixel(floorCount, downBarPin, NEO_GRB + NEO_KHZ800);
 
             Serial.println("OK");
+            openDoor();
+        }
+        
+        int getCurrentFloor() {
+            return currentFloor;
+        };
+
+        bool hasDoorOpened() {
+            return isDoorOpened;
         }
 
-        void move(int floor) {
-            changeDestinationBar(floor);
-            currentFloorBar.setPixelColor(currentFloor - 1, 0, 0, 0);
-
-            if(isDoorOpened) {
-                Serial.println("The door is opened. Please, wait until it closes to proceed.");
-            } else {
-                if(floor > currentFloor) {
-                    goUp(floor);
-                } else {
-                    goDown(floor);
-                }
-            }
+        bool hasEmergencyTriggered() {
+            return isEmergencyTriggered;
         };
 };
 
+/* Controls the elevator */
 class ElevatorController: public Elevator {
     private:
-        bool isElevatorActive = false;
-    
+        StateMachine state_machine = StateMachine();
+
     public:
-        void move(int floor) {
-            if(!isElevatorActive) {
-                Serial.println("Unable to perform this action because the elevator is not active");
-            } else {
-                Elevator::move(floor);
-            }
-        };
-        
         void turnOff() {
-            if(isElevatorActive) {
-                isElevatorActive = false;
+            if(state != INOPERANTE) {
                 turnOffLED(elevatorActivatedLEDPin);
                 Serial.println("Deactivating elevator");
                 Elevator::clearLEDBars();
+                Elevator::untriggerEmergency();
+                Elevator::closeDoor();
+                state_machine.inoperative();
             } else {
                 Serial.println("Elevator already deactivated");
             }
         };
 
         void turnOn() {
-            if(!isElevatorActive) {
-                isElevatorActive = true;
+            if(state == INOPERANTE) {
                 turnOnLED(elevatorActivatedLEDPin);
                 Serial.println("Activating elevator");
                 Elevator::startPixels();
+                state_machine.operative();
             } else {
                 Serial.println("Elevator already activated");
             }
         };
+
+        void goUp(int floor) {
+            if(Elevator::hasDoorOpened()) {
+                Serial.println("Wait for the door to close");
+            } else {
+                Elevator::goUp(floor);
+            }
+        };
+
+        void goDown(int floor) {
+            if(Elevator::hasDoorOpened()) {
+                Serial.println("Wait for the door to close");
+            } else {
+                Elevator::goDown(floor);
+            }
+        };
+
+        void triggerEmergency() {
+            if(state == INOPERANTE) {
+                Serial.println("Cannot perform action because the elevator is deactivated");
+            } else {
+                if(!Elevator::hasEmergencyTriggered()) {
+                    Elevator::triggerEmergency();
+                    Serial.println("The emergency button has been triggered");
+                } else {
+                    Elevator::untriggerEmergency();
+                    Serial.println("The emergency button has been untriggered");
+                }
+            }
+        };
+
+        void closeDoor() {
+            if(state == INOPERANTE) {
+                Serial.println("Cannot perform action because the elevator is deactivated");
+            } else {
+                if(!Elevator::hasDoorOpened()) {
+                    Serial.println("The door is already closed");
+                } else {
+                    Elevator::closeDoor();
+                    Serial.println("Closing door...");
+                    delay(500);
+                    Serial.println("The door has been closed");
+                }
+            }
+        };
 };
 
-StateMachine *state_machine;
+ElevatorController *elevator;
 
 /* Elevator moves according to the desired floor by the button pressed */
-void gotoFloor() {
+void actions() {
     int button = analogRead(A0);
+
     switch (button) {
+        case buttonOn: elevator->turnOn(); break;
+        case buttonOff: elevator->turnOff(); break;
+        case buttonEmergency: elevator->triggerEmergency(); break;
+        case buttonCloseDoor: elevator->closeDoor(); break;
     }
 }
 
 void setup() {
     pinMode(analogPin, FALLING);
     pinMode(elevatorActivatedLEDPin, OUTPUT);
+    pinMode(emergencyLEDPin, OUTPUT);
+    pinMode(elevatorDoorLEDPin, OUTPUT);
 
     Serial.begin(9600);
 
-    attachInterrupt(0, gotoFloor, INPUT_PULLUP);
+    attachInterrupt(0, actions, INPUT_PULLUP);
 
-    state_machine = new StateMachine();
+    elevator = new ElevatorController();
 }
 
 void loop() {
